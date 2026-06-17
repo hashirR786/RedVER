@@ -1,19 +1,24 @@
-# RedVER: Redis-Compatible Cache Engine
+# RedVER: A Standalone Redis-Compatible Cache Engine from Scratch
 
-A custom, lightweight, in-memory key-value database built in Python. RedVER is fully compatible with the standard **Redis Serialization Protocol (RESP)**, making it a drop-in cache replacement for backend systems.
+RedVER is an educational, production-ready, in-memory key-value database built entirely from scratch in Python. It implements the standard **Redis Serialization Protocol (RESP v2)**, allowing it to serve as a direct drop-in replacement for standard Redis in your local and cloud backend stacks.
+
+Built using **zero third-party dependencies**—leveraging only Python's standard library (`asyncio`, `socket`, `json`, etc.)—RedVER is designed for developers who want to study database internals, custom network protocol parsers, and event-driven architectures.
+
+> [!NOTE]
+> **Walrus App Integration**: While RedVER serves as the default cache server for **local development and testing** of the Walrus Study App, the cloud-hosted production deployment of Walrus connects to a serverless **Upstash Redis** database. This architecture is necessary due to Render Free Tier restrictions, which do not allow incoming private network traffic on Free Web Services. Because RedVER is fully Redis-compatible, this transition requires zero backend code changes!
 
 ---
 
-## 🎯 Target Use Cases in Walrus Study App
+## ✨ Features
 
-RedVER was designed to optimize the performance, cost, and scalability of the **Walrus Study App**:
-
-1. **AI Tutor Responses Cache**:
-   - Stores large generated Markdown responses from Google Gemini.
-   - Prevents redundant, slow, and expensive AI API calls for identical or highly repetitive user doubts.
-2. **Strict Exam Mode State Tracker**:
-   - Offers microsecond write/read performance to track active student sessions and tab-switch warning counts.
-   - Leverages **TTL (Time To Live) expiration** to automatically discard session state if the mock exam runs out of time or is abandoned.
+- **RESP-Compliant Protocol**: Supports parsing and encoding of standard Redis Serialization Protocol (RESP v2) data structures.
+- **Concurrent TCP Server**: Built using Python's asynchronous event loop (`asyncio`) to handle multiple client connections non-blockingly.
+- **Built-in HTTP Dashboard UI**: Self-contained HTTP socket server serving a rich visual monitoring dashboard with live stats, keyspace browser, and an interactive Web CLI console.
+- **Dual Durability Modes**:
+  - **Append-Only File (AOF)**: Sequentially logs write operations to disk for recovery on startup.
+  - **Snapshotting (RDB)**: Dumps the database memory block atomically to a JSON database file (`SAVE` command).
+- **TTL Key Expiration**: Supports key lifespans using both **Passive Eviction** (purging on read) and **Active Eviction** (background scanning loop).
+- **Interactive CLI Client**: Comes with a colorful terminal shell for direct database interactions.
 
 ---
 
@@ -27,107 +32,98 @@ graph TD
     Engine <==>|Snapshot| RDB[Snapshot File]
 ```
 
-### 1. RESP Protocol Parser (`src/protocol.py`)
-Implements RESP v2 serialization and deserialization.
-- **Parser**: Hand-rolled recursive descent parser supporting Simple Strings (`+`), Errors (`-`), Integers (`:`), Bulk Strings (`$`), and Arrays (`*`).
-- **Encoder**: Converts Python objects (strings, lists, dicts, integers, exceptions) into RESP byte sequences.
-- **Fallback**: Automatically detects raw text streams (e.g. from `telnet` or `netcat`) and parses them as inline commands.
-
-### 2. Storage Engine & Expiration (`src/storage.py`)
-- Core keyspace is maintained inside memory buffers for instant access.
-- Supports **Passive Eviction**: expired keys are intercepted and deleted during read operations (`GET`, `EXISTS`).
-- Supports **Active Eviction**: a background task periodically scans random keys with an expiration, purging expired ones to keep memory footprints minimal.
-
-### 3. Durability Layer (`src/persistence.py`)
-Dual-mode persistence ensures crash-safety:
-- **Append-Only File (AOF)**: Modifying operations (e.g., `SET`, `DEL`, `EXPIRE`) are logged sequentially to `appendonly.aof` in raw RESP format. Replayed step-by-step on server boot.
-- **Snapshotting (RDB)**: The current database structure is dumped atomically to `dump.rdb` in structured JSON on call of the `SAVE` command.
+1. **Protocol Parser (`src/protocol.py`)**: A recursive-descent parser that processes RESP symbols: Simple Strings (`+`), Errors (`-`), Integers (`:`), Bulk Strings (`$`), and Arrays (`*`). It also supports inline telnet/netcat commands as a fallback.
+2. **Storage Engine (`src/storage.py`)**: Manages the in-memory keyspace hashmap and handles internal operation mappings. Includes a standard connection handshake `HELLO` command to support modern Redis clients (like `node-redis` or `redis-py`).
+3. **Persistence Layer (`src/persistence.py`)**: Coordinates disk writes. On start, it checks for `appendonly.aof` or `dump.rdb` to recover the database state automatically.
 
 ---
 
 ## ⚙️ Supported Commands
 
-| Command | Arguments | Description |
+| Command | Syntax | Description |
 |:---|:---|:---|
-| **`PING`** | `[message]` | Returns `PONG` or the optional message. |
-| **`SET`** | `key value [EX seconds]` | Stores the key-value pair with optional TTL expiration. |
-| **`GET`** | `key` | Retrieves the value of the key (returns `nil` if expired/non-existent). |
-| **`DEL`** | `key1 [key2 ...]` | Deletes one or more keys. Returns number of keys deleted. |
-| **`EXISTS`** | `key1 [key2 ...]` | Checks existence. Returns count of existing keys. |
-| **`EXPIRE`** | `key seconds` | Sets an expiration time in seconds on a key. |
-| **`TTL`** | `key` | Returns remaining TTL in seconds (-2 if expired/not found, -1 if no TTL). |
-| **`KEYS`** | `[pattern]` | Returns all keys matching standard glob patterns (e.g., `*`). |
-| **`FLUSHDB`** | — | Clears all database records. |
-| **`SAVE`** | — | Writes database state atomically to disk snapshot. |
-| **`QUIT`** | — | Closes the connection. |
+| **`PING`** | `PING [message]` | Echoes back a ping status or optional message. |
+| **`SET`** | `SET key value [EX seconds]` | Stores a string with an optional expiration time. |
+| **`GET`** | `GET key` | Returns the value. Active-evicts if the key has expired. |
+| **`INCR`** | `INCR key` | Increments the integer value of a key. |
+| **`DEL`** | `DEL key1 [key2 ...]` | Removes one or more keys. |
+| **`EXISTS`**| `EXISTS key1 [key2 ...]` | Returns the count of existing keys. |
+| **`EXPIRE`**| `EXPIRE key seconds` | Sets a TTL on a key. |
+| **`TTL`** | `TTL key` | Returns the remaining TTL in seconds. |
+| **`KEYS`** | `KEYS [pattern]` | Searches keys matching standard glob patterns (e.g. `*`). |
+| **`FLUSHDB`**| `FLUSHDB` | Wipes the keyspace completely. |
+| **`SAVE`** | `SAVE` | Writes an atomic database state snapshot to disk. |
+| **`QUIT`** | `QUIT` | Gracefully closes the client connection. |
 
 ---
 
 ## 🚀 Getting Started
 
 ### Prerequisites
-- Python ≥ 3.9 (No external dependencies required!)
+- Python 3.9 or newer. No external libraries are needed!
 
-### 1. Run the Server
-Start the server (this hosts the standard RESP port `6379` and the HTTP Dashboard on `8080` concurrently):
+### 1. Run the Database Server
+To start the database server (this exposes the RESP port `6379` and HTTP Dashboard on port `8080` concurrently):
 ```bash
 python -m src.server
 ```
-Options:
-- `--host`: Bind address (default: `127.0.0.1`).
-- `--port`: Listen port for standard Redis clients (default: `6379`).
-- `--http-port`: Port to host the Web Dashboard (default: `8080`).
-- `--no-aof`: Disable Append-Only File persistence.
 
-### 2. Open the Web Dashboard
+**Available Flags:**
+- `--host`: Bind address (default: `127.0.0.1`).
+- `--port`: Listen port for TCP/RESP clients (default: `6379`).
+- `--http-port`: Port for HTTP Web Dashboard (default: `8080`).
+- `--no-aof`: Disable active Append-Only File logging.
+
+### 2. View the Web Dashboard
 Open your browser and navigate to:
 ```
 http://127.0.0.1:8080/
 ```
-The self-hosted dashboard allows you to view metric widgets (uptime, ops count), monitor keys, see dynamic visual TTL progress bars, and run command strings inside an interactive terminal console.
+The dashboard provides a visual interface showing live uptime, operation speeds, keyspace listings, durability size, and an embedded shell client for interactive execution.
 
-### 3. Run the Interactive CLI Client
-Launch the customized, colorful terminal shell:
+### 3. Connect via the Terminal Client
+Launch the custom interactive shell to run database queries:
 ```bash
 python -m src.client
 ```
 
-### 3. Run Automated Tests
-Execute the unit and integration test suite:
+### 4. Run the Test Suite
+RedVER includes a complete suite of unit and integration tests:
 ```bash
 python -m unittest tests/test_redis.py
 ```
 
 ---
 
-## 🔗 Integration with Walrus Node.js Backend
+## 🔌 Connecting with Redis Clients (Examples)
 
-Because RedVER is fully compliant with the standard Redis protocol, you can use any existing Redis library in Node.js (like `redis` or `ioredis`) to connect directly to it.
+Because RedVER conforms to standard RESP protocols, standard Redis libraries can interact with it directly.
 
+### Node.js Example (`redis` library)
 ```javascript
-const { createClient } = require('redis');
+import { createClient } from 'redis';
 
-// Connect to RedVER on default port
-const cache = createClient({
-    url: 'redis://127.0.0.1:6379'
+const client = createClient({
+  url: 'redis://127.0.0.1:6379'
 });
 
-cache.on('error', (err) => console.log('RedVER Cache Error:', err));
+client.on('error', err => console.error('Redis Client Error:', err));
 
-async function run() {
-    await cache.connect();
-    
-    // 1. Cache an AI Tutor response for 1 hour
-    const doubtKey = 'doubt:physics:kinematics:123';
-    const aiResponse = 'To find velocity, take the derivative of position...';
-    await cache.set(doubtKey, aiResponse, {
-        EX: 3600 // Expire in 1 hour
-    });
-    
-    // 2. Fetch the cached response
-    const cachedVal = await cache.get(doubtKey);
-    console.log('Cached AI Response:', cachedVal);
-}
+await client.connect();
 
-run();
+// Perform operations
+await client.set('myKey', 'Hello from RedVER!', { EX: 60 });
+console.log(await client.get('myKey')); // 'Hello from RedVER!'
+
+await client.disconnect();
+```
+
+### Python Example (`redis-py`)
+```python
+import redis
+
+client = redis.Redis(host='127.0.0.1', port=6379, decode_responses=True)
+
+client.set('user:session', 'active', ex=300)
+print(client.get('user:session')) # 'active'
 ```
