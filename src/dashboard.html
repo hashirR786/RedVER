@@ -1,0 +1,1356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RedVER Cache Dashboard</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome for Premium Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        :root {
+            --bg-primary: #0b0f19;
+            --bg-secondary: rgba(17, 24, 39, 0.7);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+            --accent-primary: #00f2fe; /* Cyan */
+            --accent-secondary: #4facfe; /* Blue */
+            --accent-success: #10b981; /* Green */
+            --accent-error: #ef4444; /* Red */
+            --accent-warning: #f59e0b; /* Yellow */
+            --font-outfit: 'Outfit', sans-serif;
+            --font-code: 'Fira Code', monospace;
+            --glow-color: rgba(0, 242, 254, 0.15);
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+        }
+
+        body {
+            background-color: var(--bg-primary);
+            background-image: 
+                radial-gradient(at 0% 0%, rgba(79, 172, 254, 0.08) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(0, 242, 254, 0.08) 0px, transparent 50%);
+            background-attachment: fixed;
+            color: var(--text-main);
+            font-family: var(--font-outfit);
+            min-height: 100vh;
+            overflow-x: hidden;
+            padding-bottom: 2rem;
+        }
+
+        /* Layout Grid */
+        .app-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 1.5rem;
+        }
+
+        /* Glassmorphism Panel helper */
+        .glass-panel {
+            background: var(--bg-secondary);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        /* Header block */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.25rem 2rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .logo-group {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .logo-icon {
+            background: linear-gradient(135deg, var(--accent-secondary), var(--accent-primary));
+            width: 42px;
+            height: 42px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            color: #000;
+            box-shadow: 0 0 15px var(--accent-primary);
+            animation: pulse 3s infinite alternate;
+        }
+
+        .logo-text h1 {
+            font-size: 1.6rem;
+            font-weight: 700;
+            background: linear-gradient(to right, #ffffff, #a5b4fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            letter-spacing: 0.5px;
+        }
+
+        .logo-text span {
+            font-size: 0.75rem;
+            color: var(--accent-primary);
+            font-family: var(--font-code);
+            letter-spacing: 1px;
+        }
+
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            color: var(--accent-success);
+            font-weight: 600;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background-color: var(--accent-success);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--accent-success);
+            animation: blink 1.5s infinite;
+        }
+
+        /* Statistics Cards Row */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.25rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .metric-card {
+            padding: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 1.25rem;
+        }
+
+        .metric-icon {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid var(--border-color);
+            width: 54px;
+            height: 54px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            color: var(--accent-primary);
+        }
+
+        .metric-card:nth-child(2) .metric-icon {
+            color: var(--accent-success);
+        }
+
+        .metric-card:nth-child(3) .metric-icon {
+            color: var(--accent-warning);
+        }
+
+        .metric-info h3 {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 0.25rem;
+        }
+
+        .metric-value {
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: #ffffff;
+        }
+
+        /* Dashboard Body Layout */
+        .main-dashboard {
+            display: grid;
+            grid-template-columns: 1fr 450px;
+            gap: 1.5rem;
+            align-items: start;
+        }
+
+        @media (max-width: 1100px) {
+            .main-dashboard {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Keys Explorer Column */
+        .explorer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.25rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .explorer-title {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+
+        .explorer-title i {
+            color: var(--accent-primary);
+        }
+
+        .search-add-bar {
+            display: flex;
+            padding: 1rem 1.5rem;
+            gap: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(255, 255, 255, 0.01);
+        }
+
+        .search-wrapper {
+            position: relative;
+            flex-grow: 1;
+        }
+
+        .search-wrapper i {
+            position: absolute;
+            left: 1rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-muted);
+        }
+
+        .search-input {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--border-color);
+            padding: 0.65rem 1rem 0.65rem 2.5rem;
+            border-radius: 8px;
+            color: #ffffff;
+            font-family: var(--font-outfit);
+            font-size: 0.9rem;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 10px var(--glow-color);
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-secondary), var(--accent-primary));
+            color: #000;
+            border: none;
+            padding: 0.65rem 1.25rem;
+            border-radius: 8px;
+            font-weight: 600;
+            font-family: var(--font-outfit);
+            font-size: 0.9rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: opacity 0.2s, transform 0.2s;
+        }
+
+        .btn-primary:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
+
+        .btn-outline {
+            background: transparent;
+            color: var(--text-main);
+            border: 1px solid var(--border-color);
+            padding: 0.65rem 1.25rem;
+            border-radius: 8px;
+            font-weight: 500;
+            font-family: var(--font-outfit);
+            font-size: 0.9rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            transition: background 0.2s, border-color 0.2s;
+        }
+
+        .btn-outline:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: var(--text-muted);
+        }
+
+        /* Keys Grid Display */
+        .keys-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 1rem;
+            padding: 1.5rem;
+            max-height: 600px;
+            overflow-y: auto;
+            min-height: 250px;
+        }
+
+        .key-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            position: relative;
+            overflow: hidden;
+            animation: fadeIn 0.4s ease;
+        }
+
+        .key-card:hover {
+            border-color: rgba(0, 242, 254, 0.3);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+        }
+
+        .key-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 0.75rem;
+            gap: 0.5rem;
+        }
+
+        .key-name {
+            font-family: var(--font-code);
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: #ffffff;
+            word-break: break-all;
+            white-space: pre-wrap;
+        }
+
+        .key-type {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            background: rgba(79, 172, 254, 0.15);
+            color: var(--accent-secondary);
+            padding: 0.15rem 0.4rem;
+            border-radius: 4px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+
+        .key-value-preview {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            background: rgba(0, 0, 0, 0.25);
+            padding: 0.5rem;
+            border-radius: 6px;
+            margin-bottom: 1rem;
+            font-family: var(--font-code);
+            word-break: break-all;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            min-height: 3.2rem;
+        }
+
+        .key-card-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .ttl-badge {
+            font-size: 0.8rem;
+            color: var(--accent-warning);
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+            font-weight: 500;
+        }
+
+        .ttl-badge.no-expire {
+            color: var(--text-muted);
+        }
+
+        .key-actions {
+            display: flex;
+            gap: 0.35rem;
+        }
+
+        .btn-icon {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background 0.2s, color 0.2s;
+        }
+
+        .btn-icon:hover {
+            background: rgba(255, 255, 255, 0.05);
+            color: #ffffff;
+        }
+
+        .btn-icon.delete:hover {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--accent-error);
+        }
+
+        /* TTL progress line visual */
+        .ttl-progress {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            height: 3px;
+            background: linear-gradient(to right, var(--accent-warning), var(--accent-error));
+            width: 100%;
+            transition: width 0.1s linear;
+        }
+
+        /* Empty state keys */
+        .empty-keys-state {
+            grid-column: 1 / -1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 4rem 2rem;
+            color: var(--text-muted);
+            text-align: center;
+            gap: 1rem;
+        }
+
+        .empty-keys-state i {
+            font-size: 3.5rem;
+            opacity: 0.15;
+            color: #ffffff;
+        }
+
+        /* Web Console Terminal Column */
+        .console-panel {
+            display: flex;
+            flex-direction: column;
+            height: 600px;
+        }
+
+        .console-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.25rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .console-title {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 1.2rem;
+            font-weight: 600;
+        }
+
+        .console-title i {
+            color: var(--accent-success);
+        }
+
+        .console-body {
+            flex-grow: 1;
+            background: #060913;
+            padding: 1.25rem;
+            font-family: var(--font-code);
+            font-size: 0.85rem;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .console-input-row {
+            display: flex;
+            align-items: center;
+            background: #060913;
+            padding: 0.75rem 1.25rem;
+            border-bottom-left-radius: 16px;
+            border-bottom-right-radius: 16px;
+            gap: 0.5rem;
+        }
+
+        .console-prompt {
+            color: var(--accent-primary);
+            font-weight: 700;
+            font-family: var(--font-code);
+            user-select: none;
+        }
+
+        .console-input {
+            flex-grow: 1;
+            background: transparent;
+            border: none;
+            color: #ffffff;
+            font-family: var(--font-code);
+            font-size: 0.85rem;
+            outline: none;
+        }
+
+        /* CLI text formatting */
+        .cli-log-line {
+            display: flex;
+            flex-direction: column;
+            gap: 0.15rem;
+            word-break: break-all;
+            white-space: pre-wrap;
+        }
+
+        .cli-input-line {
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .cli-reply-status {
+            color: var(--accent-success);
+        }
+
+        .cli-reply-error {
+            color: var(--accent-error);
+        }
+
+        .cli-reply-integer {
+            color: var(--accent-secondary);
+        }
+
+        .cli-reply-nil {
+            color: var(--text-muted);
+            font-style: italic;
+        }
+
+        .cli-reply-string {
+            color: #ffffff;
+        }
+
+        /* Action Toolbar bottom bar */
+        .action-toolbar {
+            display: flex;
+            justify-content: flex-start;
+            padding: 1rem 1.5rem;
+            gap: 0.75rem;
+            border-top: 1px solid var(--border-color);
+            background: rgba(255, 255, 255, 0.01);
+            border-top-left-radius: 0;
+            border-top-right-radius: 0;
+            border-bottom-left-radius: 16px;
+            border-bottom-right-radius: 16px;
+        }
+
+        /* Modal windows style */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(8px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .modal-content {
+            width: 90%;
+            max-width: 500px;
+            padding: 1.75rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h2 {
+            font-size: 1.3rem;
+            font-weight: 600;
+        }
+
+        .modal-body {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+        }
+
+        .form-group label {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            font-weight: 500;
+        }
+
+        .form-input {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 0.6rem 0.85rem;
+            color: #ffffff;
+            font-family: var(--font-outfit);
+            font-size: 0.9rem;
+            outline: none;
+        }
+
+        .form-input:focus {
+            border-color: var(--accent-primary);
+        }
+
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.75rem;
+            margin-top: 0.5rem;
+        }
+
+        /* Custom notifications toast */
+        .notification-toast {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            background: rgba(17, 24, 39, 0.95);
+            border: 1px solid var(--accent-primary);
+            border-radius: 8px;
+            padding: 0.75rem 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+            z-index: 2000;
+            transform: translateY(100px);
+            opacity: 0;
+            transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.3s ease;
+        }
+
+        .notification-toast.active {
+            transform: translateY(0);
+            opacity: 1;
+        }
+
+        .notification-toast i {
+            color: var(--accent-primary);
+            font-size: 1.1rem;
+        }
+
+        .notification-toast.error {
+            border-color: var(--accent-error);
+        }
+
+        .notification-toast.error i {
+            color: var(--accent-error);
+        }
+
+        /* Animations */
+        @keyframes pulse {
+            0% { box-shadow: 0 0 10px rgba(0, 242, 254, 0.2); }
+            100% { box-shadow: 0 0 20px rgba(0, 242, 254, 0.4); }
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 0.4; }
+            50% { opacity: 1; }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="app-container">
+        <!-- Header -->
+        <header class="glass-panel">
+            <div class="logo-group">
+                <div class="logo-icon">
+                    <i class="fa-solid fa-bolt"></i>
+                </div>
+                <div class="logo-text">
+                    <h1>RedVER</h1>
+                    <span>In-Memory Redis-Compatible Engine</span>
+                </div>
+            </div>
+            <div class="status-badge">
+                <div class="status-dot"></div>
+                <span id="uptime-display">Uptime: 00:00:00</span>
+            </div>
+        </header>
+
+        <!-- Stats Grid Row -->
+        <div class="metrics-grid">
+            <div class="glass-panel metric-card">
+                <div class="metric-icon">
+                    <i class="fa-solid fa-database"></i>
+                </div>
+                <div class="metric-info">
+                    <h3>Total Keys</h3>
+                    <div id="stat-keys" class="metric-value">0</div>
+                </div>
+            </div>
+            
+            <div class="glass-panel metric-card">
+                <div class="metric-icon">
+                    <i class="fa-solid fa-arrow-trend-up"></i>
+                </div>
+                <div class="metric-info">
+                    <h3>Operations Processed</h3>
+                    <div id="stat-ops" class="metric-value">0</div>
+                </div>
+            </div>
+
+            <div class="glass-panel metric-card">
+                <div class="metric-icon">
+                    <i class="fa-solid fa-shield-halved"></i>
+                </div>
+                <div class="metric-info">
+                    <h3>Durability Logs</h3>
+                    <div id="stat-durability" class="metric-value">AOF: 0 KB</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dashboard Body Layout -->
+        <div class="main-dashboard">
+            
+            <!-- Left Grid: Key Space List -->
+            <div class="glass-panel">
+                <div class="explorer-header">
+                    <div class="explorer-title">
+                        <i class="fa-solid fa-folder-tree"></i>
+                        <span>Keyspace Browser</span>
+                    </div>
+                    <button class="btn-primary" onclick="openModal('addModal')">
+                        <i class="fa-solid fa-plus"></i> Set Key
+                    </button>
+                </div>
+                
+                <div class="search-add-bar">
+                    <div class="search-wrapper">
+                        <i class="fa-solid fa-magnifying-glass"></i>
+                        <input type="text" id="search-box" class="search-input" placeholder="Search keys by name or pattern..." oninput="renderKeysGrid()">
+                    </div>
+                </div>
+
+                <div id="keys-grid-container" class="keys-grid">
+                    <!-- Dynamic rendering -->
+                </div>
+            </div>
+
+            <!-- Right Grid: Terminal Console -->
+            <div class="glass-panel console-panel">
+                <div class="console-header">
+                    <div class="console-title">
+                        <i class="fa-solid fa-terminal"></i>
+                        <span>Web CLI Console</span>
+                    </div>
+                    <button class="btn-outline" style="padding: 0.35rem 0.75rem; font-size: 0.75rem;" onclick="clearConsole()">
+                        Clear Output
+                    </button>
+                </div>
+                
+                <div id="console-output" class="console-body">
+                    <div class="cli-log-line">
+                        <span class="cli-reply-nil">// RedVER Shell initialized. Try running PING, SET, GET, KEYS *</span>
+                    </div>
+                </div>
+                
+                <div class="console-input-row">
+                    <span class="console-prompt">redver-cli></span>
+                    <input type="text" id="cli-input" class="console-input" placeholder="Type a Redis command..." autocomplete="off">
+                </div>
+
+                <!-- Action Toolbar directly below console -->
+                <div class="action-toolbar">
+                    <button class="btn-outline" onclick="runConsoleCommand('PING')">
+                        <i class="fa-solid fa-bullhorn"></i> Ping
+                    </button>
+                    <button class="btn-outline" onclick="triggerSave()">
+                        <i class="fa-solid fa-floppy-disk"></i> Save Snapshot
+                    </button>
+                    <button class="btn-outline" style="border-color: rgba(239,68,68,0.2); color: #fca5a5;" onclick="triggerFlush()">
+                        <i class="fa-solid fa-trash-can"></i> Flush DB
+                    </button>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Set Key Modal -->
+    <div id="addModal" class="modal-overlay">
+        <div class="glass-panel modal-content">
+            <div class="modal-header">
+                <h2>Set Key-Value</h2>
+                <button class="btn-icon" onclick="closeModal('addModal')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="modal-key">Key Name</label>
+                    <input type="text" id="modal-key" class="form-input" placeholder="e.g. user:session:101">
+                </div>
+                <div class="form-group">
+                    <label for="modal-value">Value (Text/JSON)</label>
+                    <textarea id="modal-value" class="form-input" style="height: 120px; font-family: var(--font-code); font-size: 0.8rem; resize: vertical;" placeholder="Enter value..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="modal-ttl">Expiration TTL (seconds, leave empty for permanent)</label>
+                    <input type="number" id="modal-ttl" class="form-input" placeholder="e.g. 60">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-outline" onclick="closeModal('addModal')">Cancel</button>
+                <button class="btn-primary" onclick="submitSetKey()">Save Key</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Value Viewer Modal -->
+    <div id="viewModal" class="modal-overlay">
+        <div class="glass-panel modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h2 id="view-modal-title" style="font-family: var(--font-code);">key:name</h2>
+                <button class="btn-icon" onclick="closeModal('viewModal')"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Value Output (Formatted)</label>
+                    <pre id="view-modal-body" style="background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); border-radius: 6px; padding: 1rem; color: #ffffff; font-family: var(--font-code); font-size: 0.8rem; white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto;"></pre>
+                </div>
+                <div id="view-modal-ttl" class="ttl-badge">TTL: Permanent</div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" onclick="closeModal('viewModal')">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div id="toast" class="notification-toast">
+        <i class="fa-solid fa-circle-info" id="toast-icon"></i>
+        <span id="toast-message">Message text...</span>
+    </div>
+
+    <script>
+        // Core state
+        let keysList = [];
+        let systemStats = { uptime: 0, ops: 0, keys_count: 0, aof_size: 0, rdb_size: 0 };
+        let commandHistory = [];
+        let historyIndex = -1;
+        
+        // Fetch URL configuration (defaults to same server)
+        const API_BASE = window.location.origin;
+
+        // Initialize Web Dashboard
+        window.addEventListener('DOMContentLoaded', () => {
+            fetchStats();
+            fetchKeys();
+            
+            // Periodically fetch statistics and keys
+            setInterval(fetchStats, 2000);
+            setInterval(fetchKeys, 2000);
+            
+            // Subsecond countdown execution for high-fidelity animations
+            setInterval(updateLocalTTLs, 200);
+
+            // Register Terminal Input events
+            const cliInput = document.getElementById('cli-input');
+            cliInput.addEventListener('keydown', handleConsoleInput);
+        });
+
+        // Toast Helper
+        function showToast(message, isError = false) {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toast-message');
+            const toastIcon = document.getElementById('toast-icon');
+            
+            toastMsg.textContent = message;
+            
+            if (isError) {
+                toast.classList.add('error');
+                toastIcon.className = 'fa-solid fa-circle-exclamation';
+            } else {
+                toast.classList.remove('error');
+                toastIcon.className = 'fa-solid fa-circle-check';
+            }
+            
+            toast.classList.add('active');
+            setTimeout(() => {
+                toast.classList.remove('active');
+            }, 3000);
+        }
+
+        // Modal Helpers
+        function openModal(id) {
+            document.getElementById(id).classList.add('active');
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('active');
+            if (id === 'addModal') {
+                document.getElementById('modal-key').value = '';
+                document.getElementById('modal-value').value = '';
+                document.getElementById('modal-ttl').value = '';
+            }
+        }
+
+        // Uptime Display Formatter
+        function formatUptime(seconds) {
+            const hrs = Math.floor(seconds / 3600).toString().padStart(2, '0');
+            const mins = Math.floor((seconds % 3600) / 60).toString().padStart(2, '0');
+            const secs = (seconds % 60).toString().padStart(2, '0');
+            return `Uptime: ${hrs}:${mins}:${secs}`;
+        }
+
+        // Fetch Metrics from /api/stats
+        async function fetchStats() {
+            try {
+                const res = await fetch(`${API_BASE}/api/stats`);
+                if (!res.ok) throw new Error();
+                systemStats = await res.json();
+                
+                // Render Uptime
+                document.getElementById('uptime-display').textContent = formatUptime(systemStats.uptime);
+                
+                // Render Stats
+                document.getElementById('stat-keys').textContent = systemStats.keys_count;
+                document.getElementById('stat-ops').textContent = systemStats.ops;
+                
+                // Durability displays
+                let sizeStr = '';
+                if (systemStats.aof_enabled) {
+                    sizeStr = `AOF: ${(systemStats.aof_size / 1024).toFixed(2)} KB`;
+                } else {
+                    sizeStr = `RDB: ${(systemStats.rdb_size / 1024).toFixed(2)} KB`;
+                }
+                document.getElementById('stat-durability').textContent = sizeStr;
+            } catch (e) {
+                document.getElementById('uptime-display').textContent = "Disconnected";
+                document.getElementById('uptime-display').parentElement.style.borderColor = 'rgba(239,68,68,0.2)';
+                document.getElementById('uptime-display').parentElement.style.background = 'rgba(239,68,68,0.1)';
+            }
+        }
+
+        // Fetch Keys from /api/keys
+        async function fetchKeys() {
+            try {
+                const res = await fetch(`${API_BASE}/api/keys`);
+                if (!res.ok) throw new Error();
+                const data = await res.json();
+                
+                // Preserve start countdown reference by copying current items if names match
+                const currentMap = new Map(keysList.map(k => [k.name, k]));
+                
+                keysList = data.keys.map(newKey => {
+                    const existing = currentMap.get(newKey.name);
+                    
+                    // If key existed and TTL is still counting down, check if we need to reset start_ttl
+                    if (existing && newKey.ttl > 0) {
+                        // Keep previous max starting TTL if TTL decreased
+                        const maxTtl = Math.max(existing.start_ttl || 0, newKey.ttl);
+                        return { ...newKey, start_ttl: maxTtl, client_ttl: newKey.ttl };
+                    }
+                    
+                    return { ...newKey, start_ttl: newKey.ttl > 0 ? newKey.ttl : 0, client_ttl: newKey.ttl };
+                });
+                
+                renderKeysGrid();
+            } catch (e) {
+                // Ignore API read failures in silent loops
+            }
+        }
+
+        // Local TTL decrement logic for visual smoothness
+        function updateLocalTTLs() {
+            let changed = false;
+            keysList.forEach(k => {
+                if (k.ttl > 0 && k.client_ttl > 0) {
+                    k.client_ttl = Math.max(0, k.client_ttl - 0.2);
+                    if (k.client_ttl === 0) {
+                        k.ttl = -2; // Treat as expired
+                    }
+                    changed = true;
+                }
+            });
+            if (changed) {
+                renderKeysGrid();
+            }
+        }
+
+        // Render Keys List
+        function renderKeysGrid() {
+            const container = document.getElementById('keys-grid-container');
+            const searchQuery = document.getElementById('search-box').value.trim().toLowerCase();
+            
+            // Filter keys
+            const filtered = keysList.filter(k => {
+                if (k.ttl === -2) return false; // Hide locally expired keys
+                if (!searchQuery) return true;
+                return k.name.toLowerCase().includes(searchQuery);
+            });
+
+            if (filtered.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-keys-state">
+                        <i class="fa-regular fa-folder-open"></i>
+                        <p>${searchQuery ? 'No keys match your query.' : 'Database is completely empty.'}</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = filtered.map(k => {
+                const isPermanent = k.ttl === -1;
+                const remaining = k.client_ttl > 0 ? Math.ceil(k.client_ttl) : 0;
+                
+                // Calculate TTL progress percentage
+                let progressPercent = 100;
+                if (!isPermanent && k.start_ttl > 0) {
+                    progressPercent = (k.client_ttl / k.start_ttl) * 100;
+                }
+
+                // Format values for rendering preview
+                let preview = k.value;
+                try {
+                    // Try parsing JSON for pretty printing
+                    const parsed = JSON.parse(k.value);
+                    preview = JSON.stringify(parsed, null, 2);
+                } catch (e) {}
+
+                return `
+                    <div class="key-card">
+                        <div class="key-card-header">
+                            <span class="key-name">${escapeHTML(k.name)}</span>
+                            <span class="key-type">string</span>
+                        </div>
+                        <div class="key-value-preview">${escapeHTML(preview)}</div>
+                        <div class="key-card-footer">
+                            <div class="ttl-badge ${isPermanent ? 'no-expire' : ''}">
+                                <i class="fa-regular ${isPermanent ? 'fa-circle-check' : 'fa-clock'}"></i>
+                                <span>${isPermanent ? 'Permanent' : remaining + 's'}</span>
+                            </div>
+                            <div class="key-actions">
+                                <button class="btn-icon" title="View Details" onclick="viewKeyDetails('${escapeJS(k.name)}')">
+                                    <i class="fa-regular fa-eye"></i>
+                                </button>
+                                <button class="btn-icon delete" title="Delete Key" onclick="deleteKey('${escapeJS(k.name)}')">
+                                    <i class="fa-regular fa-trash-can"></i>
+                                </button>
+                            </div>
+                        </div>
+                        ${!isPermanent ? `<div class="ttl-progress" style="width: ${progressPercent}%"></div>` : ''}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Trigger Exec Command
+        async function runConsoleCommand(commandText) {
+            const cmd = commandText.trim();
+            if (!cmd) return;
+
+            appendConsoleLine(`redver-cli> ${cmd}`, 'cli-input-line');
+            
+            try {
+                const res = await fetch(`${API_BASE}/api/exec`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cmd: cmd })
+                });
+                
+                if (!res.ok) throw new Error("HTTP connection failed");
+                const data = await res.json();
+                
+                if (data.status === 'error') {
+                    appendConsoleLine(`(error) ${data.error}`, 'cli-reply-error');
+                } else {
+                    const resultType = data.type;
+                    const val = data.result;
+                    
+                    if (val === null) {
+                        appendConsoleLine('(nil)', 'cli-reply-nil');
+                    } else if (resultType === 'status') {
+                        appendConsoleLine(val, 'cli-reply-status');
+                    } else if (resultType === 'integer') {
+                        appendConsoleLine(`(integer) ${val}`, 'cli-reply-integer');
+                    } else if (resultType === 'array') {
+                        if (val.length === 0) {
+                            appendConsoleLine('(empty array)', 'cli-reply-nil');
+                        } else {
+                            val.forEach((item, index) => {
+                                appendConsoleLine(`${index + 1}) "${item}"`, 'cli-reply-string');
+                            });
+                        }
+                    } else {
+                        appendConsoleLine(`"${val}"`, 'cli-reply-string');
+                    }
+                }
+            } catch (err) {
+                appendConsoleLine(`(error) Connection failure: Could not reach RedVER API.`, 'cli-reply-error');
+            }
+            
+            // Refresh database structures on modifications
+            fetchStats();
+            fetchKeys();
+        }
+
+        // Web CLI Console input handler
+        function handleConsoleInput(e) {
+            const input = e.target;
+            if (e.key === 'Enter') {
+                const cmd = input.value.trim();
+                if (!cmd) return;
+                
+                runConsoleCommand(cmd);
+                
+                // Add to history
+                commandHistory.push(cmd);
+                historyIndex = commandHistory.length;
+                input.value = '';
+            } else if (e.key === 'ArrowUp') {
+                // Navigate history
+                if (historyIndex > 0) {
+                    historyIndex--;
+                    input.value = commandHistory[historyIndex];
+                }
+                e.preventDefault();
+            } else if (e.key === 'ArrowDown') {
+                if (historyIndex < commandHistory.length - 1) {
+                    historyIndex++;
+                    input.value = commandHistory[historyIndex];
+                } else {
+                    historyIndex = commandHistory.length;
+                    input.value = '';
+                }
+                e.preventDefault();
+            }
+        }
+
+        // Append to UI terminal
+        function appendConsoleLine(text, className) {
+            const consoleOutput = document.getElementById('console-output');
+            const line = document.createElement('div');
+            line.className = 'cli-log-line';
+            
+            const span = document.createElement('span');
+            span.className = className;
+            span.textContent = text;
+            line.appendChild(span);
+            
+            consoleOutput.appendChild(line);
+            consoleOutput.scrollTop = consoleOutput.scrollHeight;
+        }
+
+        // Clear terminal display
+        function clearConsole() {
+            document.getElementById('console-output').innerHTML = `
+                <div class="cli-log-line">
+                    <span class="cli-reply-nil">// Outputs cleared.</span>
+                </div>
+            `;
+        }
+
+        // Set Key submission
+        async function submitSetKey() {
+            const key = document.getElementById('modal-key').value.trim();
+            const value = document.getElementById('modal-value').value;
+            const ttl = document.getElementById('modal-ttl').value.trim();
+            
+            if (!key) {
+                showToast("Key name is required!", true);
+                return;
+            }
+
+            let cmd = `SET "${key.replace(/"/g, '\\"')}" "${value.replace(/"/g, '\\"')}"`;
+            if (ttl) {
+                cmd += ` EX ${ttl}`;
+            }
+
+            try {
+                const res = await fetch(`${API_BASE}/api/exec`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cmd: cmd })
+                });
+                
+                const data = await res.json();
+                if (data.status === 'success') {
+                    showToast(`Key "${key}" saved successfully!`);
+                    closeModal('addModal');
+                    fetchKeys();
+                    fetchStats();
+                } else {
+                    showToast(data.error || "Execution error", true);
+                }
+            } catch (e) {
+                showToast("Network execution failure", true);
+            }
+        }
+
+        // Quick delete action
+        async function deleteKey(keyName) {
+            if (!confirm(`Are you sure you want to delete the key "${keyName}"?`)) return;
+            
+            try {
+                const cmd = `DEL "${keyName.replace(/"/g, '\\"')}"`;
+                const res = await fetch(`${API_BASE}/api/exec`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cmd: cmd })
+                });
+                const data = await res.json();
+                if (data.status === 'success' && data.result > 0) {
+                    showToast(`Key "${keyName}" deleted.`);
+                    fetchKeys();
+                    fetchStats();
+                } else {
+                    showToast(data.error || "Failed to delete key", true);
+                }
+            } catch (e) {
+                showToast("Connection failure", true);
+            }
+        }
+
+        // View detail modal loader
+        function viewKeyDetails(keyName) {
+            const keyObj = keysList.find(k => k.name === keyName);
+            if (!keyObj) return;
+
+            document.getElementById('view-modal-title').textContent = `key: ${keyObj.name}`;
+            
+            let prettyVal = keyObj.value;
+            try {
+                const parsed = JSON.parse(keyObj.value);
+                prettyVal = JSON.stringify(parsed, null, 4);
+            } catch (e) {}
+            
+            document.getElementById('view-modal-body').textContent = prettyVal;
+            
+            const isPermanent = keyObj.ttl === -1;
+            const remaining = keyObj.client_ttl > 0 ? Math.ceil(keyObj.client_ttl) : 0;
+            
+            document.getElementById('view-modal-ttl').innerHTML = isPermanent 
+                ? `<i class="fa-regular fa-circle-check"></i> Expire: Permanent`
+                : `<i class="fa-regular fa-clock"></i> Expire: ${remaining} seconds remaining`;
+            
+            if (isPermanent) {
+                document.getElementById('view-modal-ttl').className = 'ttl-badge no-expire';
+            } else {
+                document.getElementById('view-modal-ttl').className = 'ttl-badge';
+            }
+
+            openModal('viewModal');
+        }
+
+        // Trigger snapshot write
+        async function triggerSave() {
+            showToast("Saving database snapshot...");
+            try {
+                const res = await fetch(`${API_BASE}/api/exec`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cmd: 'SAVE' })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    showToast("Snapshot saved successfully!");
+                    fetchStats();
+                } else {
+                    showToast(data.error || "Snapshot save failed", true);
+                }
+            } catch (e) {
+                showToast("Connection error", true);
+            }
+        }
+
+        // Trigger flush database
+        async function triggerFlush() {
+            if (!confirm("🚨 WARNING: Are you sure you want to delete ALL keys? This cannot be undone!")) return;
+            
+            try {
+                const res = await fetch(`${API_BASE}/api/exec`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cmd: 'FLUSHDB' })
+                });
+                const data = await res.json();
+                if (data.status === 'success') {
+                    showToast("Database flushed clean.");
+                    fetchKeys();
+                    fetchStats();
+                } else {
+                    showToast(data.error || "Flush execution failed", true);
+                }
+            } catch (e) {
+                showToast("Connection failure", true);
+            }
+        }
+
+        // Escaping helpers
+        function escapeHTML(str) {
+            if (!str) return '';
+            return str
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function escapeJS(str) {
+            if (!str) return '';
+            return str
+                .replace(/\\/g, '\\\\')
+                .replace(/'/g, "\\'")
+                .replace(/"/g, '\\"');
+        }
+    </script>
+</body>
+</html>

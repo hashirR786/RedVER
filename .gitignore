@@ -1,0 +1,15 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# RedVER runtime database state files
+appendonly.aof
+dump.rdb
+
+# Environments
+.env
+.venv
+venv/
+ENV/
+env/

@@ -1,0 +1,3 @@
+# RedVER: Redis-Compatible Cache Engine
+# Built entirely using Python's standard library (asyncio, socket, json, etc.).
+# No external dependencies required!
