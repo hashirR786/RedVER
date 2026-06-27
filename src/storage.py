@@ -11,6 +11,7 @@ class StorageEngine:
         self._db = {}       # key (str) -> value (str)
         self._expires = {}  # key (str) -> expiration timestamp (float)
         self._aof_callback = None
+        self._save_callback = None
 
     def set_aof_callback(self, callback):
         """Sets the write callback function that intercepts modifying commands."""
@@ -183,6 +184,15 @@ class StorageEngine:
         self._expires.clear()
         self._log_write(["FLUSHDB"])
         return SimpleString("OK")
+
+    def cmd_save(self):
+        if self._save_callback:
+            success = self._save_callback()
+            if success:
+                return SimpleString("OK")
+            else:
+                return Exception("ERR failed to save snapshot")
+        return Exception("ERR snapshot save callback not registered")
         
     def active_expire_cycle(self):
         """Invoked periodically to clean up expired keys in the background."""

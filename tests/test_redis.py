@@ -138,6 +138,13 @@ class TestPersistence(unittest.TestCase):
         self.assertGreater(new_db.execute(["TTL", "expkey"]), 50)
         new_pm.close()
 
+    def test_save_command(self):
+        self.db.execute(["SET", "cmdkey", "cmdval"])
+        res = self.db.execute(["SAVE"])
+        self.assertEqual(res, SimpleString("OK"))
+        self.assertTrue(os.path.exists(self.rdb_path))
+
+
 
 class TestHTTPServer(unittest.TestCase):
     @classmethod
