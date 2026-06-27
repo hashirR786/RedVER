@@ -341,10 +341,14 @@ class RedisServer:
 
 
 if __name__ == "__main__":
+    env_host = os.environ.get("HOST", "0.0.0.0")
+    env_port = os.environ.get("PORT")
+    default_http_port = int(env_port) if (env_port and env_port.isdigit()) else 8080
+
     parser = argparse.ArgumentParser(description="RedVER: A lightweight Redis-compatible cache.")
-    parser.add_argument("--host", default="127.0.0.1", help="Host address to bind (default: 127.0.0.1)")
+    parser.add_argument("--host", default=env_host, help="Host address to bind (default: 0.0.0.0 or $HOST)")
     parser.add_argument("--port", type=int, default=6379, help="Port to listen on (default: 6379)")
-    parser.add_argument("--http-port", type=int, default=8080, help="Port for HTTP Dashboard UI (default: 8080)")
+    parser.add_argument("--http-port", type=int, default=default_http_port, help="Port for HTTP Dashboard UI (default: 8080 or $PORT)")
     parser.add_argument("--no-aof", action="store_true", help="Disable Append-Only File persistence")
     
     args = parser.parse_args()

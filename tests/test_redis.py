@@ -152,6 +152,9 @@ class TestHTTPServer(unittest.TestCase):
         # We create a new event loop and run the RedisServer inside a separate daemon thread
         cls.loop = asyncio.new_event_loop()
         cls.server = RedisServer(host="127.0.0.1", port=6389, http_port=8089, aof_enabled=False)
+        cls.server.persistence.rdb_path = "tests/test_http_dump.rdb"
+        cls.server.persistence.aof_path = "tests/test_http_appendonly.aof"
+        cls.server.storage.cmd_flushdb()
         
         def run_server():
             asyncio.set_event_loop(cls.loop)
