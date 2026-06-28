@@ -216,5 +216,180 @@ class TestHTTPServer(unittest.TestCase):
             self.assertIn("test_http_val", values)
 
 
+
+class TestDataStructures(unittest.TestCase):
+    """Tests for List, Hash, Set, Sorted Set data structures and TYPE command."""
+
+    def setUp(self):
+        self.db = StorageEngine()
+
+    # ── List ──────────────────────────────────────────────────────────────
+    def test_list_lpush_rpush_lrange(self):
+        self.assertEqual(self.db.execute(["RPUSH", "lst", "a", "b", "c"]), 3)
+        self.assertEqual(self.db.execute(["LPUSH", "lst", "z"]), 4)
+        self.assertEqual(self.db.execute(["LRANGE", "lst", "0", "-1"]), ["z", "a", "b", "c"])
+
+    def test_list_lpop_rpop(self):
+        self.db.execute(["RPUSH", "lst2", "x", "y", "z"])
+        self.assertEqual(self.db.execute(["LPOP", "lst2"]), "x")
+        self.assertEqual(self.db.execute(["RPOP", "lst2"]), "z")
+        self.assertEqual(self.db.execute(["LLEN", "lst2"]), 1)
+
+    def test_list_llen_empty(self):
+        self.assertEqual(self.db.execute(["LLEN", "nokey"]), 0)
+
+    def test_list_lrange_negative(self):
+        self.db.execute(["RPUSH", "rl", "a", "b", "c", "d"])
+        self.assertEqual(self.db.execute(["LRANGE", "rl", "-2", "-1"]), ["c", "d"])
+
+    def test_list_pop_deletes_empty_key(self):
+        self.db.execute(["RPUSH", "one", "only"])
+        self.db.execute(["LPOP", "one"])
+        self.assertIsNone(self.db.execute(["GET", "one"]))  # key gone
+
+    def test_list_type_guard(self):
+        self.db.execute(["SET", "strkey", "val"])
+        res = self.db.execute(["LPUSH", "strkey", "x"])
+        self.assertIsInstance(res, Exception)
+        self.assertIn("WRONGTYPE", str(res))
+
+    # ── Hash ──────────────────────────────────────────────────────────────
+    def test_hash_hset_hget(self):
+        self.assertEqual(self.db.execute(["HSET", "user", "name", "hashir"]), 1)
+        self.assertEqual(self.db.execute(["HSET", "user", "age", "21"]), 1)
+        self.assertEqual(self.db.execute(["HGET", "user", "name"]), "hashir")
+        self.assertIsNone(self.db.execute(["HGET", "user", "missing"]))
+
+    def test_hash_hset_update(self):
+        self.db.execute(["HSET", "h", "f", "v1"])
+        result = self.db.execute(["HSET", "h", "f", "v2"])  # update
+        self.assertEqual(result, 0)
+        self.assertEqual(self.db.execute(["HGET", "h", "f"]), "v2")
+
+    def test_hash_hgetall(self):
+        self.db.execute(["HSET", "h2", "a", "1"])
+        self.db.execute(["HSET", "h2", "b", "2"])
+        flat = self.db.execute(["HGETALL", "h2"])
+        self.assertEqual(set(zip(flat[::2], flat[1::2])), {("a", "1"), ("b", "2")})
+
+    def test_hash_hdel_hkeys_hlen(self):
+        self.db.execute(["HSET", "h3", "x", "1"])
+        self.db.execute(["HSET", "h3", "y", "2"])
+        self.assertEqual(self.db.execute(["HLEN", "h3"]), 2)
+        self.db.execute(["HDEL", "h3", "x"])
+        self.assertEqual(self.db.execute(["HKEYS", "h3"]), ["y"])
+
+    def test_hash_type_guard(self):
+        self.db.execute(["SET", "strkey2", "val"])
+        res = self.db.execute(["HSET", "strkey2", "f", "v"])
+        self.assertIsInstance(res, Exception)
+        self.assertIn("WRONGTYPE", str(res))
+
+    # ── Set ───────────────────────────────────────────────────────────────
+    def test_set_sadd_smembers(self):
+        self.assertEqual(self.db.execute(["SADD", "s1", "a", "b", "c"]), 3)
+        self.assertEqual(self.db.execute(["SADD", "s1", "a"]), 0)  # duplicate
+        members = self.db.execute(["SMEMBERS", "s1"])
+        self.assertEqual(set(members), {"a", "b", "c"})
+
+    def test_set_srem_sismember(self):
+        self.db.execute(["SADD", "s2", "x", "y"])
+        self.assertEqual(self.db.execute(["SISMEMBER", "s2", "x"]), 1)
+        self.db.execute(["SREM", "s2", "x"])
+        self.assertEqual(self.db.execute(["SISMEMBER", "s2", "x"]), 0)
+
+    def test_set_sunion_sinter_sdiff(self):
+        self.db.execute(["SADD", "sa", "1", "2", "3"])
+        self.db.execute(["SADD", "sb", "2", "3", "4"])
+        self.assertEqual(set(self.db.execute(["SUNION", "sa", "sb"])), {"1", "2", "3", "4"})
+        self.assertEqual(set(self.db.execute(["SINTER", "sa", "sb"])), {"2", "3"})
+        self.assertEqual(set(self.db.execute(["SDIFF", "sa", "sb"])), {"1"})
+
+    def test_set_type_guard(self):
+        self.db.execute(["SET", "strkey3", "val"])
+        res = self.db.execute(["SADD", "strkey3", "m"])
+        self.assertIsInstance(res, Exception)
+        self.assertIn("WRONGTYPE", str(res))
+
+    # ── Sorted Set ────────────────────────────────────────────────────────
+    def test_zset_zadd_zrange_zscore(self):
+        self.db.execute(["ZADD", "lb", "100", "alice"])
+        self.db.execute(["ZADD", "lb", "200", "bob"])
+        self.db.execute(["ZADD", "lb", "50", "charlie"])
+        self.assertEqual(self.db.execute(["ZRANGE", "lb", "0", "-1"]),
+                         ["charlie", "alice", "bob"])
+        self.assertEqual(self.db.execute(["ZSCORE", "lb", "bob"]), "200.0")
+
+    def test_zset_zrank(self):
+        self.db.execute(["ZADD", "lb2", "10", "a"])
+        self.db.execute(["ZADD", "lb2", "20", "b"])
+        self.assertEqual(self.db.execute(["ZRANK", "lb2", "a"]), 0)
+        self.assertEqual(self.db.execute(["ZRANK", "lb2", "b"]), 1)
+        self.assertIsNone(self.db.execute(["ZRANK", "lb2", "missing"]))
+
+    def test_zset_zrem(self):
+        self.db.execute(["ZADD", "lb3", "5", "x"])
+        self.db.execute(["ZADD", "lb3", "10", "y"])
+        self.assertEqual(self.db.execute(["ZREM", "lb3", "x"]), 1)
+        self.assertEqual(self.db.execute(["ZRANGE", "lb3", "0", "-1"]), ["y"])
+
+    def test_zset_update_score(self):
+        self.db.execute(["ZADD", "lb4", "1", "m"])
+        self.assertEqual(self.db.execute(["ZADD", "lb4", "99", "m"]), 0)  # update
+        self.assertEqual(self.db.execute(["ZSCORE", "lb4", "m"]), "99.0")
+        self.assertEqual(self.db.execute(["ZRANK", "lb4", "m"]), 0)
+
+    def test_zset_type_guard(self):
+        self.db.execute(["SET", "strkey4", "val"])
+        res = self.db.execute(["ZADD", "strkey4", "1", "m"])
+        self.assertIsInstance(res, Exception)
+        self.assertIn("WRONGTYPE", str(res))
+
+    # ── TYPE command ──────────────────────────────────────────────────────
+    def test_type_command(self):
+        self.db.execute(["SET", "sk", "v"])
+        self.db.execute(["LPUSH", "lk", "v"])
+        self.db.execute(["HSET", "hk", "f", "v"])
+        self.db.execute(["SADD", "setk", "v"])
+        self.db.execute(["ZADD", "zk", "1", "v"])
+        self.assertEqual(self.db.execute(["TYPE", "sk"]),   SimpleString("string"))
+        self.assertEqual(self.db.execute(["TYPE", "lk"]),   SimpleString("list"))
+        self.assertEqual(self.db.execute(["TYPE", "hk"]),   SimpleString("hash"))
+        self.assertEqual(self.db.execute(["TYPE", "setk"]), SimpleString("set"))
+        self.assertEqual(self.db.execute(["TYPE", "zk"]),   SimpleString("zset"))
+        self.assertEqual(self.db.execute(["TYPE", "none"]), SimpleString("none"))
+
+    # ── RDB round-trip with new types ─────────────────────────────────────
+    def test_rdb_roundtrip_all_types(self):
+        aof_path = "tests/test_ds_aof.aof"
+        rdb_path = "tests/test_ds_dump.rdb"
+        for p in [aof_path, rdb_path]:
+            if os.path.exists(p):
+                os.remove(p)
+
+        pm = PersistenceManager(self.db, aof_path=aof_path, rdb_path=rdb_path)
+        self.db.execute(["SET",   "sk",   "hello"])
+        self.db.execute(["RPUSH", "lk",   "a", "b"])
+        self.db.execute(["HSET",  "hk",   "f", "v"])
+        self.db.execute(["SADD",  "setk", "x"])
+        self.db.execute(["ZADD",  "zk",   "7", "m"])
+        self.assertTrue(pm.save_snapshot())
+        pm.close()
+
+        new_db = StorageEngine()
+        new_pm = PersistenceManager(new_db, aof_path=aof_path, rdb_path=rdb_path)
+        self.assertTrue(new_pm.load_snapshot())
+
+        self.assertEqual(new_db.execute(["GET",       "sk"]),        "hello")
+        self.assertEqual(new_db.execute(["LRANGE",    "lk", "0", "-1"]), ["a", "b"])
+        self.assertEqual(new_db.execute(["HGET",      "hk", "f"]),   "v")
+        self.assertEqual(new_db.execute(["SMEMBERS",  "setk"]),      ["x"])
+        self.assertEqual(new_db.execute(["ZSCORE",    "zk",  "m"]),  "7.0")
+        new_pm.close()
+        for p in [aof_path, rdb_path]:
+            if os.path.exists(p):
+                os.remove(p)
+
+
 if __name__ == "__main__":
     unittest.main()

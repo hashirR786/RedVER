@@ -236,16 +236,33 @@ class RedisServer:
                     all_keys = list(self.storage._db.keys())
                     for k in all_keys:
                         self.storage._is_expired(k)
-                        
+
                     keys_data = []
                     for k in self.storage._db:
                         ttl = self.storage.cmd_ttl(k)
+                        type_tag = self.storage._types.get(k, "string")
+                        raw_val = self.storage._db[k]
+                        # Serialize value based on type for JSON transport
+                        if type_tag == "string":
+                            display_val = raw_val
+                        elif type_tag == "list":
+                            display_val = list(raw_val)
+                        elif type_tag == "hash":
+                            display_val = dict(raw_val)
+                        elif type_tag == "set":
+                            display_val = list(raw_val)
+                        elif type_tag == "zset":
+                            sl, _ = raw_val
+                            display_val = [[item[0], item[1]] for item in sl]
+                        else:
+                            display_val = str(raw_val)
                         keys_data.append({
                             "name": k,
-                            "value": self.storage._db[k],
+                            "value": display_val,
+                            "type": type_tag,
                             "ttl": ttl
                         })
-                        
+
                     json_str = json.dumps({"keys": keys_data})
                     resp_bytes = json_str.encode('utf-8')
                     response = (
