@@ -5,7 +5,7 @@ import os
 import time
 import json
 import shlex
-from src.protocol import parse_resp, encode_response, SimpleString
+from src.protocol import parse_resp, encode_response, SimpleString, RespMap
 from src.storage import StorageEngine
 from src.persistence import PersistenceManager
 
@@ -95,56 +95,69 @@ class RedisServer:
         """Handles incoming client connection and maps requests onto StorageEngine."""
         addr = writer.get_extra_info('peername')
         print(f"[+] Client connected from {addr[0]}:{addr[1]}")
-        
+
         buf = bytearray()
+        # Per-connection RESP3 flag — toggled by HELLO 3
+        resp3 = False
         try:
             while self.is_running:
                 data = await reader.read(4096)
                 if not data:
                     break
-                
+
                 buf.extend(data)
-                
+
+                # ── Pipeline drain: consume ALL complete messages in buf ──
                 while True:
                     cmd_args, consumed = parse_resp(bytes(buf))
                     if consumed == 0:
-                        # Incomplete packet, wait for more data
+                        # Incomplete packet — wait for more data from the socket
                         break
-                    
+
                     del buf[:consumed]
-                    
-                    if cmd_args is None:
+
+                    if cmd_args is None or cmd_args == []:
+                        # Null array or blank inline line — skip silently
                         continue
-                        
+
                     if isinstance(cmd_args, Exception):
-                        writer.write(encode_response(cmd_args))
+                        writer.write(encode_response(cmd_args, resp3))
                         await writer.drain()
                         continue
-                    
+
                     if not isinstance(cmd_args, list):
-                        # Wrap raw/inline commands if needed
                         cmd_args = [cmd_args]
-                        
-                    if not cmd_args:
-                        continue
-                        
+
                     cmd_name = str(cmd_args[0]).upper()
-                    
-                    # Intercept QUIT command
+
+                    # ── QUIT: send OK, then close ──────────────────────────
                     if cmd_name == "QUIT":
-                        writer.write(encode_response(SimpleString("OK")))
+                        writer.write(encode_response(SimpleString("OK"), resp3))
                         await writer.drain()
-                        break
-                        
-                    # Standard execution
+                        return   # exit handle_client cleanly
+
+                    # ── Standard execution ────────────────────────────────
                     result = self.storage.execute(cmd_args)
                     self.stats_ops_count += 1
-                    writer.write(encode_response(result))
+
+                    # ── HELLO sentinel — switch protocol version ───────────
+                    if isinstance(result, tuple) and len(result) == 3 and result[0] == "__HELLO__":
+                        _, proto, info = result
+                        resp3 = (proto == 3)
+                        if resp3:
+                            wire = encode_response(RespMap(info), resp3=True)
+                        else:
+                            # RESP2: flatten dict to array [k, v, k, v, ...]
+                            flat = []
+                            for k, v in info.items():
+                                flat.extend([k, v])
+                            wire = encode_response(flat, resp3=False)
+                        writer.write(wire)
+                    else:
+                        writer.write(encode_response(result, resp3))
+
                     await writer.drain()
-                    
-                if not data or (cmd_args and str(cmd_args[0]).upper() == "QUIT"):
-                    break
-                    
+
         except asyncio.IncompleteReadError:
             pass
         except ConnectionResetError:

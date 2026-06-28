@@ -5,7 +5,7 @@ import threading
 import urllib.request
 import json
 import asyncio
-from src.protocol import parse_resp, encode_response, SimpleString
+from src.protocol import parse_resp, encode_response, SimpleString, RespMap, RespDouble
 from src.storage import StorageEngine
 from src.persistence import PersistenceManager
 from src.server import RedisServer
@@ -53,6 +53,118 @@ class TestProtocol(unittest.TestCase):
         self.assertEqual(encode_response(123), b":123\r\n")
         self.assertEqual(encode_response("test"), b"$4\r\ntest\r\n")
         self.assertEqual(encode_response(["GET", "key"]), b"*2\r\n$3\r\nGET\r\n$3\r\nkey\r\n")
+
+class TestProtocol2(unittest.TestCase):
+    """Tests for RESP3 types, inline quoted parsing, and pipelining."""
+
+    # ── RESP3 encoder ──────────────────────────────────────────────────────
+    def test_resp3_null(self):
+        self.assertEqual(encode_response(None, resp3=True), b"_\r\n")
+
+    def test_resp3_boolean(self):
+        self.assertEqual(encode_response(True,  resp3=True), b"#t\r\n")
+        self.assertEqual(encode_response(False, resp3=True), b"#f\r\n")
+        # RESP2 booleans stay as integers
+        self.assertEqual(encode_response(True,  resp3=False), b":1\r\n")
+        self.assertEqual(encode_response(False, resp3=False), b":0\r\n")
+
+    def test_resp3_double(self):
+        self.assertEqual(encode_response(RespDouble(3.14), resp3=True), b",3.14\r\n")
+        self.assertEqual(encode_response(RespDouble(float('inf')),  resp3=True), b",inf\r\n")
+        self.assertEqual(encode_response(RespDouble(float('-inf')), resp3=True), b",-inf\r\n")
+
+    def test_resp3_map_encode(self):
+        wire = encode_response(RespMap({"a": 1}), resp3=True)
+        self.assertEqual(wire, b"%1\r\n$1\r\na\r\n:1\r\n")
+
+    def test_resp3_map_encode_resp2_fallback(self):
+        # In RESP2 mode a RespMap should not occur, but a plain dict flattens to array
+        wire = encode_response({"x": "y"}, resp3=False)
+        self.assertEqual(wire, b"*2\r\n$1\r\nx\r\n$1\r\ny\r\n")
+
+    # ── RESP3 parser ───────────────────────────────────────────────────────
+    def test_parse_resp3_null(self):
+        val, consumed = parse_resp(b"_\r\n")
+        self.assertIsNone(val)
+        self.assertEqual(consumed, 3)
+
+    def test_parse_resp3_boolean(self):
+        t, _ = parse_resp(b"#t\r\n")
+        f, _ = parse_resp(b"#f\r\n")
+        self.assertTrue(t)
+        self.assertFalse(f)
+
+    def test_parse_resp3_double(self):
+        val, consumed = parse_resp(b",3.14\r\n")
+        self.assertIsInstance(val, RespDouble)
+        self.assertAlmostEqual(val.value, 3.14)
+        self.assertEqual(consumed, 7)
+
+    def test_parse_resp3_map(self):
+        # %1\r\n + key + value
+        wire = b"%1\r\n$3\r\nfoo\r\n:42\r\n"
+        val, consumed = parse_resp(wire)
+        self.assertIsInstance(val, RespMap)
+        self.assertEqual(val.data["foo"], 42)
+        self.assertEqual(consumed, len(wire))
+
+    def test_parse_resp3_big_number(self):
+        val, consumed = parse_resp(b"(9999999999999999\r\n")
+        self.assertEqual(val, 9999999999999999)
+
+    # ── Inline quoted tokens ───────────────────────────────────────────────
+    def test_inline_quoted_value(self):
+        """Inline SET with a quoted multi-word value must parse as 3 tokens."""
+        val, consumed = parse_resp(b'SET mykey "hello world"\r\n')
+        self.assertEqual(val, ["SET", "mykey", "hello world"])
+        self.assertEqual(consumed, 25)
+
+    def test_inline_lf_only(self):
+        """\\n-only terminator (netcat default) must be accepted."""
+        val, consumed = parse_resp(b"PING\n")
+        self.assertEqual(val, ["PING"])
+        self.assertEqual(consumed, 5)
+
+    def test_inline_blank_line(self):
+        """A blank line must return an empty list (skipped by server)."""
+        val, consumed = parse_resp(b"\r\n")
+        self.assertEqual(val, [])
+        self.assertEqual(consumed, 2)
+
+    # ── Pipelining ─────────────────────────────────────────────────────────
+    def test_pipelining_two_commands_in_one_buffer(self):
+        """
+        Two complete RESP messages concatenated in one TCP chunk must both
+        parse correctly without either being dropped.
+        """
+        cmd1 = b"*3\r\n$3\r\nSET\r\n$1\r\na\r\n$1\r\n1\r\n"
+        cmd2 = b"*2\r\n$3\r\nGET\r\n$1\r\na\r\n"
+        buf  = cmd1 + cmd2
+
+        val1, c1 = parse_resp(buf)
+        self.assertEqual(val1, ["SET", "a", "1"])
+
+        val2, c2 = parse_resp(buf[c1:])
+        self.assertEqual(val2, ["GET", "a"])
+
+        self.assertEqual(c1 + c2, len(buf))   # all bytes consumed
+
+    def test_pipelining_partial_tail_returns_zero(self):
+        """
+        A complete first message + incomplete second message must consume
+        exactly the first message and return 0 for the second (caller buffers).
+        """
+        complete = b"*1\r\n$4\r\nPING\r\n"
+        partial  = b"*2\r\n$3\r\nGET\r\n"   # missing the key bulk string
+        buf = complete + partial
+
+        val1, c1 = parse_resp(buf)
+        self.assertEqual(val1, ["PING"])
+
+        val2, c2 = parse_resp(buf[c1:])
+        self.assertIsNone(val2)               # incomplete → wait for more
+        self.assertEqual(c2, 0)
+
 
 
 class TestStorageEngine(unittest.TestCase):

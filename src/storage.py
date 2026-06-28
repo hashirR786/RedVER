@@ -2,7 +2,7 @@ import time
 import fnmatch
 from collections import deque
 from sortedcontainers import SortedList
-from src.protocol import SimpleString
+from src.protocol import SimpleString, RespMap
 
 # Type name constants (match Redis type strings)
 TYPE_STRING = "string"
@@ -132,15 +132,36 @@ class StorageEngine:
         return self._db.get(key, None)
 
     def cmd_hello(self, *args):
-        return [
-            "server", "redis",
-            "version", "6.0.0",
-            "proto", 2,
-            "id", 1,
-            "mode", "standalone",
-            "role", "master",
-            "modules", []
-        ]
+        """
+        HELLO [protover] — negotiate protocol version.
+        Returns a tagged dict so the TCP layer can switch to RESP3 encoding.
+        proto=2  → RESP2 (default)
+        proto=3  → RESP3 (maps, doubles, booleans on the wire)
+        """
+        proto = 2
+        if args:
+            try:
+                proto = int(args[0])
+            except ValueError:
+                return Exception("ERR Protocol version is not an integer or out of range")
+            if proto not in (2, 3):
+                return Exception(
+                    f"NOPROTO unsupported protocol version"
+                )
+
+        info = {
+            "server":  "redis",
+            "version": "7.0.0",
+            "proto":   proto,
+            "id":      1,
+            "mode":    "standalone",
+            "role":    "master",
+            "modules": [],
+        }
+        # Tag the result so the TCP handler knows to switch proto versions.
+        # We use a plain dict here; server.py will wrap it in RespMap for RESP3
+        # or flatten it for RESP2, and also flip its per-connection resp3 flag.
+        return ("__HELLO__", proto, info)
 
     def cmd_incr(self, key: str):
         self._is_expired(key)
