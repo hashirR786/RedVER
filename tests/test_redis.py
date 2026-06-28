@@ -503,5 +503,256 @@ class TestDataStructures(unittest.TestCase):
                 os.remove(p)
 
 
+
+class TestPubSub(unittest.TestCase):
+    """Unit tests for PubSubManager (no network needed)."""
+
+    def setUp(self):
+        from src.pubsub import PubSubManager
+        self.pm = PubSubManager()
+
+    def _make_queue(self):
+        return asyncio.Queue()
+
+    def test_subscribe_and_publish(self):
+        loop = asyncio.new_event_loop()
+        try:
+            q = asyncio.Queue()
+            self.pm.subscribe("news", q)
+            count = self.pm.publish("news", "hello")
+            self.assertEqual(count, 1)
+            msg = q.get_nowait()
+            self.assertEqual(msg, ["message", "news", "hello"])
+        finally:
+            loop.close()
+
+    def test_publish_no_subscribers(self):
+        count = self.pm.publish("empty", "msg")
+        self.assertEqual(count, 0)
+
+    def test_unsubscribe(self):
+        q = asyncio.Queue()
+        self.pm.subscribe("ch", q)
+        self.pm.unsubscribe("ch", q)
+        count = self.pm.publish("ch", "data")
+        self.assertEqual(count, 0)
+
+    def test_pattern_subscribe(self):
+        q = asyncio.Queue()
+        self.pm.psubscribe("news.*", q)
+        count = self.pm.publish("news.sports", "goal!")
+        self.assertEqual(count, 1)
+        msg = q.get_nowait()
+        self.assertEqual(msg, ["pmessage", "news.*", "news.sports", "goal!"])
+
+    def test_pattern_no_match(self):
+        q = asyncio.Queue()
+        self.pm.psubscribe("events.*", q)
+        count = self.pm.publish("news.tech", "story")
+        self.assertEqual(count, 0)
+
+    def test_multiple_subscribers_same_channel(self):
+        q1, q2 = asyncio.Queue(), asyncio.Queue()
+        self.pm.subscribe("alerts", q1)
+        self.pm.subscribe("alerts", q2)
+        count = self.pm.publish("alerts", "fire!")
+        self.assertEqual(count, 2)
+        self.assertEqual(q1.get_nowait()[2], "fire!")
+        self.assertEqual(q2.get_nowait()[2], "fire!")
+
+    def test_remove_subscriber_cleans_all_channels(self):
+        q = asyncio.Queue()
+        self.pm.subscribe("a", q)
+        self.pm.subscribe("b", q)
+        self.pm.psubscribe("c.*", q)
+        self.pm.remove_subscriber(q)
+        self.assertEqual(self.pm.publish("a", "x"), 0)
+        self.assertEqual(self.pm.publish("b", "x"), 0)
+        self.assertEqual(self.pm.publish("c.1", "x"), 0)
+
+    def test_active_channel_count(self):
+        q = asyncio.Queue()
+        self.pm.subscribe("x", q)
+        self.pm.subscribe("y", q)
+        self.assertEqual(self.pm.active_channel_count, 2)
+        self.pm.unsubscribe("x", q)
+        self.assertEqual(self.pm.active_channel_count, 1)
+
+    def test_cmd_publish_via_storage(self):
+        from src.pubsub import PubSubManager
+        db = StorageEngine()
+        ps = PubSubManager()
+        db._pubsub = ps
+        q = asyncio.Queue()
+        ps.subscribe("mychan", q)
+        result = db.execute(["PUBLISH", "mychan", "testmsg"])
+        self.assertEqual(result, 1)
+        self.assertEqual(q.get_nowait(), ["message", "mychan", "testmsg"])
+
+
+class TestPubSubIntegration(unittest.TestCase):
+    """
+    Integration tests: real TCP connections against a running RedisServer.
+    Uses the raw TCP socket to test SUBSCRIBE, PUBLISH, PSUBSCRIBE.
+    """
+
+    RESP_PORT = 6391
+    HTTP_PORT = 8091
+
+    @classmethod
+    def setUpClass(cls):
+        cls.loop = asyncio.new_event_loop()
+        cls.server = RedisServer(
+            host="127.0.0.1", port=cls.RESP_PORT,
+            http_port=cls.HTTP_PORT, aof_enabled=False
+        )
+        cls.server.persistence.rdb_path = "tests/test_ps_dump.rdb"
+        cls.server.persistence.aof_path = "tests/test_ps_aof.aof"
+        cls.server.storage.cmd_flushdb()
+
+        def run_server():
+            asyncio.set_event_loop(cls.loop)
+            cls.loop.run_until_complete(cls.server.start())
+
+        cls.thread = threading.Thread(target=run_server, daemon=True)
+        cls.thread.start()
+        time.sleep(0.5)
+
+    @classmethod
+    def tearDownClass(cls):
+        if cls.server.is_running:
+            cls.loop.call_soon_threadsafe(cls.server.stop)
+        time.sleep(0.3)
+        cls.loop.call_soon_threadsafe(cls.loop.stop)
+        cls.thread.join(timeout=2.0)
+
+    def _connect(self):
+        """Opens a raw TCP socket to the RESP server."""
+        import socket
+        s = socket.create_connection(("127.0.0.1", self.RESP_PORT), timeout=3)
+        return s
+
+    def _send_cmd(self, sock, *args):
+        """Sends a RESP array command."""
+        cmd = f"*{len(args)}\r\n"
+        for a in args:
+            a = str(a)
+            cmd += f"${len(a)}\r\n{a}\r\n"
+        sock.sendall(cmd.encode())
+
+    def _read_line(self, sock) -> bytes:
+        """Reads until \\r\\n."""
+        buf = b""
+        while not buf.endswith(b"\r\n"):
+            buf += sock.recv(1)
+        return buf
+
+    def _read_resp(self, sock) -> any:
+        """Reads a single RESP value from the socket."""
+        line = self._read_line(sock)
+        data, _ = parse_resp(line)
+        if isinstance(data, SimpleString) and data.value.startswith("*") is False:
+            # Might be a partial array \u2014 read full
+            pass
+        # Read full chunk and parse
+        chunk = line
+        # Accumulate until we parse a full value
+        buf = line
+        while True:
+            val, consumed = parse_resp(buf)
+            if consumed > 0:
+                return val
+            buf += sock.recv(4096)
+
+    def test_subscribe_then_publish(self):
+        """Subscriber receives a message published by another connection."""
+        import socket
+
+        sub_sock = self._connect()
+        pub_sock = self._connect()
+        try:
+            # Subscribe to "chat"
+            self._send_cmd(sub_sock, "SUBSCRIBE", "chat")
+            # Read subscribe confirmation: ["subscribe", "chat", 1]
+            buf = b""
+            while True:
+                buf += sub_sock.recv(4096)
+                val, consumed = parse_resp(buf)
+                if consumed > 0:
+                    break
+            self.assertEqual(val, ["subscribe", "chat", 1])
+
+            # Publish from another connection
+            self._send_cmd(pub_sock, "PUBLISH", "chat", "hello world")
+            # Read publisher's integer reply
+            pub_buf = b""
+            while True:
+                pub_buf += pub_sock.recv(4096)
+                pub_val, pub_c = parse_resp(pub_buf)
+                if pub_c > 0:
+                    break
+            self.assertEqual(pub_val, 1)   # 1 recipient
+
+            # Read pushed message on subscriber socket
+            sub_sock.settimeout(2.0)
+            msg_buf = buf[consumed:]
+            while True:
+                try:
+                    msg_buf += sub_sock.recv(4096)
+                except socket.timeout:
+                    break
+                val2, c2 = parse_resp(msg_buf)
+                if c2 > 0:
+                    break
+            self.assertEqual(val2, ["message", "chat", "hello world"])
+
+        finally:
+            sub_sock.close()
+            pub_sock.close()
+
+    def test_psubscribe_wildcard(self):
+        """Pattern subscriber receives messages on matching channels."""
+        import socket
+
+        sub_sock = self._connect()
+        pub_sock = self._connect()
+        try:
+            self._send_cmd(sub_sock, "PSUBSCRIBE", "sport.*")
+            buf = b""
+            while True:
+                buf += sub_sock.recv(4096)
+                val, consumed = parse_resp(buf)
+                if consumed > 0:
+                    break
+            self.assertEqual(val, ["psubscribe", "sport.*", 1])
+
+            # Publish to matching channel
+            self._send_cmd(pub_sock, "PUBLISH", "sport.football", "goal")
+            pub_buf = b""
+            while True:
+                pub_buf += pub_sock.recv(4096)
+                pv, pc = parse_resp(pub_buf)
+                if pc > 0:
+                    break
+            self.assertEqual(pv, 1)
+
+            # Read pmessage
+            sub_sock.settimeout(2.0)
+            msg_buf = buf[consumed:]
+            while True:
+                try:
+                    msg_buf += sub_sock.recv(4096)
+                except socket.timeout:
+                    break
+                mv, mc = parse_resp(msg_buf)
+                if mc > 0:
+                    break
+            self.assertEqual(mv, ["pmessage", "sport.*", "sport.football", "goal"])
+
+        finally:
+            sub_sock.close()
+            pub_sock.close()
+
+
 if __name__ == "__main__":
     unittest.main()

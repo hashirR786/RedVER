@@ -8,6 +8,7 @@ import shlex
 from src.protocol import parse_resp, encode_response, SimpleString, RespMap
 from src.storage import StorageEngine
 from src.persistence import PersistenceManager
+from src.pubsub import PubSubManager
 
 class RedisServer:
     """
@@ -20,14 +21,16 @@ class RedisServer:
         self.port = port
         self.http_port = http_port
         self.aof_enabled = aof_enabled
-        
+
         self.storage = StorageEngine()
         self.persistence = PersistenceManager(self.storage)
+        self.pubsub = PubSubManager()
+        self.storage._pubsub = self.pubsub   # inject so cmd_publish can reach it
         self.server = None
         self.http_server = None
         self._active_expire_task = None
         self.is_running = False
-        
+
         # Dashboard metrics
         self.start_time = time.time()
         self.stats_ops_count = 0
@@ -91,6 +94,22 @@ class RedisServer:
             except Exception as e:
                 print(f"[-] Error in eviction cycle: {e}")
 
+    async def _pubsub_push(self, queue: asyncio.Queue, writer: asyncio.StreamWriter, resp3: bool):
+        """
+        Long-running push coroutine for a subscribed connection.
+        Reads message lists from queue and writes them to the client socket.
+        Terminates when None is enqueued (disconnect sentinel).
+        """
+        try:
+            while True:
+                msg = await queue.get()
+                if msg is None:
+                    break
+                writer.write(encode_response(msg, resp3))
+                await writer.drain()
+        except Exception:
+            pass
+
     async def handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         """Handles incoming client connection and maps requests onto StorageEngine."""
         addr = writer.get_extra_info('peername')
@@ -99,6 +118,13 @@ class RedisServer:
         buf = bytearray()
         # Per-connection RESP3 flag — toggled by HELLO 3
         resp3 = False
+        # Per-connection Pub/Sub state
+        sub_mode  = False
+        sub_queue = None
+        push_task = None
+        sub_chans = set()   # exact channels this connection is subscribed to
+        sub_pats  = set()   # patterns this connection is subscribed to
+
         try:
             while self.is_running:
                 data = await reader.read(4096)
@@ -111,13 +137,11 @@ class RedisServer:
                 while True:
                     cmd_args, consumed = parse_resp(bytes(buf))
                     if consumed == 0:
-                        # Incomplete packet — wait for more data from the socket
                         break
 
                     del buf[:consumed]
 
                     if cmd_args is None or cmd_args == []:
-                        # Null array or blank inline line — skip silently
                         continue
 
                     if isinstance(cmd_args, Exception):
@@ -130,24 +154,91 @@ class RedisServer:
 
                     cmd_name = str(cmd_args[0]).upper()
 
-                    # ── QUIT: send OK, then close ──────────────────────────
+                    # ── QUIT ──────────────────────────────────────────────
                     if cmd_name == "QUIT":
                         writer.write(encode_response(SimpleString("OK"), resp3))
                         await writer.drain()
-                        return   # exit handle_client cleanly
+                        return
 
-                    # ── Standard execution ────────────────────────────────
+                    # ── SUBSCRIBE / PSUBSCRIBE ───────────────────────────
+                    if cmd_name in ("SUBSCRIBE", "PSUBSCRIBE"):
+                        if not sub_mode:
+                            sub_mode  = True
+                            sub_queue = asyncio.Queue()
+                            push_task = asyncio.create_task(
+                                self._pubsub_push(sub_queue, writer, resp3)
+                            )
+                        channels = [str(a) for a in cmd_args[1:]]
+                        if not channels:
+                            writer.write(encode_response(
+                                Exception("ERR wrong number of arguments for 'subscribe' command"), resp3))
+                            await writer.drain()
+                            continue
+                        for chan in channels:
+                            if cmd_name == "SUBSCRIBE":
+                                self.pubsub.subscribe(chan, sub_queue)
+                                sub_chans.add(chan)
+                                reply_type = "subscribe"
+                            else:
+                                self.pubsub.psubscribe(chan, sub_queue)
+                                sub_pats.add(chan)
+                                reply_type = "psubscribe"
+                            total = len(sub_chans) + len(sub_pats)
+                            writer.write(encode_response([reply_type, chan, total], resp3))
+                        await writer.drain()
+                        self.stats_ops_count += 1
+                        continue
+
+                    # ── UNSUBSCRIBE / PUNSUBSCRIBE ───────────────────────
+                    if cmd_name in ("UNSUBSCRIBE", "PUNSUBSCRIBE"):
+                        is_pattern = cmd_name == "PUNSUBSCRIBE"
+                        targets = [str(a) for a in cmd_args[1:]]
+                        # No argument = unsubscribe from all in this category
+                        if not targets:
+                            targets = list(sub_pats if is_pattern else sub_chans)
+                        for chan in targets:
+                            if is_pattern:
+                                self.pubsub.punsubscribe(chan, sub_queue)
+                                sub_pats.discard(chan)
+                                reply_type = "punsubscribe"
+                            else:
+                                self.pubsub.unsubscribe(chan, sub_queue)
+                                sub_chans.discard(chan)
+                                reply_type = "unsubscribe"
+                            total = len(sub_chans) + len(sub_pats)
+                            writer.write(encode_response([reply_type, chan, total], resp3))
+                        await writer.drain()
+                        # If zero subscriptions remain, exit subscribe mode
+                        if not sub_chans and not sub_pats:
+                            sub_mode = False
+                        self.stats_ops_count += 1
+                        continue
+
+                    # ── Commands allowed in subscribe mode ───────────────
+                    if sub_mode:
+                        if cmd_name == "PING":
+                            # Redis pushes ["pong", <message>] in subscribe mode
+                            msg = str(cmd_args[1]) if len(cmd_args) > 1 else ""
+                            writer.write(encode_response(["pong", msg], resp3))
+                            await writer.drain()
+                        else:
+                            writer.write(encode_response(
+                                Exception(f"ERR Command not allowed in subscribe mode: '{cmd_name}'"),
+                                resp3))
+                            await writer.drain()
+                        continue
+
+                    # ── Standard execution (normal mode) ─────────────────
                     result = self.storage.execute(cmd_args)
                     self.stats_ops_count += 1
 
-                    # ── HELLO sentinel — switch protocol version ───────────
+                    # ── HELLO sentinel — switch protocol version ──────────
                     if isinstance(result, tuple) and len(result) == 3 and result[0] == "__HELLO__":
                         _, proto, info = result
                         resp3 = (proto == 3)
                         if resp3:
                             wire = encode_response(RespMap(info), resp3=True)
                         else:
-                            # RESP2: flatten dict to array [k, v, k, v, ...]
                             flat = []
                             for k, v in info.items():
                                 flat.extend([k, v])
@@ -165,6 +256,15 @@ class RedisServer:
         except Exception as e:
             print(f"[-] Error processing client {addr[0]}:{addr[1]}: {e}")
         finally:
+            # Clean up Pub/Sub state for this connection
+            if sub_queue is not None:
+                self.pubsub.remove_subscriber(sub_queue)
+                sub_queue.put_nowait(None)   # signal push_task to stop
+            if push_task is not None:
+                try:
+                    await asyncio.wait_for(push_task, timeout=0.5)
+                except Exception:
+                    push_task.cancel()
             writer.close()
             try:
                 await writer.wait_closed()

@@ -24,6 +24,7 @@ class StorageEngine:
         self._expires = {}  # key (str) -> expiration timestamp (float)
         self._aof_callback = None
         self._save_callback = None
+        self._pubsub = None  # injected by RedisServer after init
 
     def set_aof_callback(self, callback):
         """Sets the write callback function that intercepts modifying commands."""
@@ -251,6 +252,16 @@ class StorageEngine:
             else:
                 return Exception("ERR failed to save snapshot")
         return Exception("ERR snapshot save callback not registered")
+
+    def cmd_publish(self, channel: str, message: str):
+        """
+        PUBLISH channel message
+        Delivers message to all subscribers of channel (exact + pattern).
+        Returns the number of clients that received the message.
+        """
+        if self._pubsub is None:
+            return 0
+        return self._pubsub.publish(channel, str(message))
 
     # ─────────────────────────────────────────────
     # List commands  (backed by collections.deque)
